@@ -1,7 +1,12 @@
 [build]
   publish = "."
 
-# Proxy verso gli open data MIMIT: aggira il CORS senza Netlify Functions.
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# La funzione /api/prezzi è la via principale: scarica e filtra lato server.
+# Questo redirect resta come rete di sicurezza per leggere i CSV grezzi.
 [[redirects]]
   from = "/mimit/*"
   to = "https://www.mimit.gov.it/images/exportCSV/:splat"

@@ -201,19 +201,17 @@ footer{margin-top:22px;font-size:11px;color:var(--mute);line-height:1.7}
 (() => {
 "use strict";
 
-/* ====== ambito territoriale: cambia qui per un'altra provincia ====== */
+/* ====== ambito territoriale ====== */
 const PROVINCIA = "LU";
 const PROV_NOME = "provincia di Lucca";
 
-/* ====== sorgenti ====== */
-const ORIGIN = "https://www.mimit.gov.it/images/exportCSV/";
-const FILES  = { ana:"anagrafica_impianti_attivi.csv", prz:"prezzo_alle_8.csv" };
-const ROUTES = [
-  { id:"proxy Netlify", url:f => "/mimit/" + f },
-  { id:"allorigins",    url:f => "https://api.allorigins.win/raw?url=" + encodeURIComponent(ORIGIN + f) },
-  { id:"corsproxy.io",  url:f => "https://corsproxy.io/?url=" + encodeURIComponent(ORIGIN + f) },
-  { id:"codetabs",      url:f => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(ORIGIN + f) }
-];
+/* ====== sorgenti ======
+   1. la Netlify Function: filtra lato server, ~30 KB
+   2. i CSV grezzi via redirect /mimit/: ~15 MB, solo se la funzione manca
+   I proxy CORS pubblici sono stati tolti: allorigins va in timeout e
+   codetabs si ferma a 5 MB, quindi su questi file non funzionano.        */
+const API = "/api/prezzi?prov=" + PROVINCIA;
+const CSV = { ana:"/mimit/anagrafica_impianti_attivi.csv", prz:"/mimit/prezzo_alle_8.csv" };
 const IDLE_MS = 25000;
 
 /* ====== stato ====== */
@@ -252,54 +250,67 @@ function dayNum(s){ const m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s||"");
 function dayLabel(n){ const d = new Date(EPOCH + n*864e5);
   return String(d.getUTCDate()).padStart(2,"0") + "/" + String(d.getUTCMonth()+1).padStart(2,"0"); }
 
-/* ====== download ====== */
-async function streamCSV(file, onLine, label){
-  const failures = [];
-  for(const route of ROUTES){
-    const ctl = new AbortController();
-    let timer = setTimeout(() => ctl.abort(), IDLE_MS);
-    try{
-      const res = await fetch(route.url(file), {cache:"no-store", signal:ctl.signal});
-      if(!res.ok) throw new Error("HTTP " + res.status);
-      if(!res.body) throw new Error("streaming non supportato");
-      const total = +(res.headers.get("content-length") || 0);
-      const reader = res.body.getReader(), dec = new TextDecoder("utf-8");
-      let buf = "", got = 0, n = 0;
-      for(;;){
-        const {done, value} = await reader.read();
-        if(done) break;
-        clearTimeout(timer); timer = setTimeout(() => ctl.abort(), IDLE_MS);
-        got += value.length;
-        pct(total ? Math.min(99, got/total*100) : Math.min(95, n/1800));
-        buf += dec.decode(value, {stream:true});
-        let i;
-        while((i = buf.indexOf("\n")) >= 0){
-          const line = buf.slice(0, i).replace(/\r$/, "");
-          buf = buf.slice(i + 1);
-          if(n === 0){
-            if(!/^Estrazione del/.test(line)) throw new Error("risposta non valida (non è il CSV)");
-            S.extraction = line.replace("Estrazione del","").trim();
-          } else if(n > 1) onLine(line);
-          n++;
-        }
-      }
-      buf += dec.decode();
-      if(buf.trim() && n > 1) onLine(buf.replace(/\r$/, ""));
-      clearTimeout(timer);
-      if(n < 100) throw new Error("solo " + n + " righe ricevute");
-      log("  " + label + " · " + n.toLocaleString("it-IT") + " righe via " + route.id, "ok");
-      return;
-    }catch(e){
-      clearTimeout(timer);
-      failures.push(route.id + " → " + (e.name === "AbortError" ? "nessun dato per " + IDLE_MS/1000 + "s" : e.message));
-    }
-  }
-  const err = new Error("nessuna via disponibile per " + label);
-  err.detail = failures;
-  throw err;
+function contaBandiere(){
+  S.brandCount.clear();
+  for(const p of S.plants) S.brandCount.set(p.b, (S.brandCount.get(p.b)||0) + 1);
 }
 
-/* ====== parsing: si tiene solo la provincia scelta ====== */
+/* ====== via 1: la funzione ====== */
+async function viaApi(){
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 30000);
+  try{
+    const res = await fetch(API, {signal:ctl.signal});
+    const ct = res.headers.get("content-type") || "";
+    if(!ct.includes("json")) throw new Error("la funzione non è distribuita");
+    const j = await res.json();
+    if(!res.ok) throw new Error(j.errore || ("HTTP " + res.status));
+    S.extraction = j.estrazione;
+    S.plants = j.impianti;
+    S.rows = j.prezzi.map(a => ({ i:a[0], f:j.carburanti[a[1]], p:a[2], s:a[3] === 1, d:a[4] }));
+    contaBandiere();
+    log("  " + S.plants.length + " impianti · " + S.rows.length + " listini via /api/prezzi", "ok");
+  } finally { clearTimeout(timer); }
+}
+
+/* ====== via 2: CSV grezzi a flusso ====== */
+async function streamCSV(url, onLine, label){
+  const ctl = new AbortController();
+  let timer = setTimeout(() => ctl.abort(), IDLE_MS);
+  try{
+    const res = await fetch(url, {cache:"no-store", signal:ctl.signal});
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    if(!res.body) throw new Error("streaming non supportato");
+    const total = +(res.headers.get("content-length") || 0);
+    const reader = res.body.getReader(), dec = new TextDecoder("utf-8");
+    let buf = "", got = 0, n = 0;
+    for(;;){
+      const {done, value} = await reader.read();
+      if(done) break;
+      clearTimeout(timer); timer = setTimeout(() => ctl.abort(), IDLE_MS);
+      got += value.length;
+      pct(total ? Math.min(99, got/total*100) : Math.min(95, n/1800));
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while((i = buf.indexOf("\n")) >= 0){
+        const line = buf.slice(0, i).replace(/\r$/, "");
+        buf = buf.slice(i + 1);
+        if(n === 0){
+          if(!/^Estrazione del/.test(line)) throw new Error("risposta non valida (non è il CSV)");
+          S.extraction = line.replace("Estrazione del","").trim();
+        } else if(n > 1) onLine(line);
+        n++;
+      }
+    }
+    buf += dec.decode();
+    if(buf.trim() && n > 1) onLine(buf.replace(/\r$/, ""));
+    if(n < 100) throw new Error("solo " + n + " righe ricevute");
+    log("  " + label + " · " + n.toLocaleString("it-IT") + " righe", "ok");
+  }catch(e){
+    throw new Error(label + ": " + (e.name === "AbortError" ? "nessun dato per " + IDLE_MS/1000 + "s" : e.message));
+  }finally{ clearTimeout(timer); }
+}
+
 function onAnagrafica(line){
   const p = line.split("|");            // alcuni nomi contengono "|": le code si leggono dal fondo
   if(p.length < 10) return;
@@ -308,17 +319,23 @@ function onAnagrafica(line){
   if(!b) return;
   S.index.set(p[0], S.plants.length);
   S.plants.push({ n:(p[4]||"").trim(), c:titolo((p[p.length-4]||"").trim()), b });
-  S.brandCount.set(b, (S.brandCount.get(b)||0) + 1);
 }
-
 function onPrezzi(line){
   const p = line.split("|");
   if(p.length < 5) return;
   const idx = S.index.get(p[0]);
-  if(idx === undefined) return;         // fuori provincia: scartato subito
+  if(idx === undefined) return;
   const price = parseFloat(p[2]);
   if(!(price > 0.2 && price < 5)) return;
   S.rows.push({ i:idx, f:p[1], p:price, s:p[3] === "1", d:dayNum(p[4]) });
+}
+
+async function viaCsv(){
+  log("> ripiego sui CSV grezzi (15 MB)…", "warn");
+  await streamCSV(CSV.ana, onAnagrafica, "anagrafica");
+  log("  " + S.plants.length + " impianti in " + PROV_NOME, "ok");
+  await streamCSV(CSV.prz, onPrezzi, "prezzi");
+  contaBandiere();
 }
 
 /* ====== caricamento ====== */
@@ -326,44 +343,46 @@ async function load(){
   lines = []; pctVal = 0;
   S.plants = []; S.index.clear(); S.rows = []; S.brandCount.clear();
   boot.classList.remove("hide");
-  log("> apertura canale MIMIT…");
+  log("> lettura dati " + PROV_NOME + "…");
+  pct(20);
+  const problemi = [];
   try{
-    log("> anagrafica impianti");
-    await streamCSV(FILES.ana, onAnagrafica, "anagrafica");
-    log("  " + S.plants.length + " impianti in " + PROV_NOME, "ok");
-    log("> listini alle 8:00");
-    await streamCSV(FILES.prz, onPrezzi, "prezzi");
+    try{
+      await viaApi();
+    }catch(e){
+      problemi.push("/api/prezzi → " + e.message);
+      await viaCsv();
+    }
     pct(100);
     if(!S.rows.length) throw new Error("nessun prezzo per la " + PROV_NOME);
-    log("> " + S.rows.length.toLocaleString("it-IT") + " listini · estrazione " + S.extraction, "ok");
+    log("> estrazione " + S.extraction, "ok");
     setTimeout(() => boot.classList.add("hide"), 900);
     buildFilters(); render();
     $("#controls").hidden = false; $("#kpis").hidden = false;
     ["#pTrend","#pBrand","#pCom","#pList"].forEach(s => $(s).hidden = false);
     $("#stamp").textContent = "estrazione " + S.extraction;
   }catch(e){
-    log("> " + e.message, "er");
-    (e.detail || []).forEach(d => log("  " + d, "er"));
+    problemi.push(e.message);
+    problemi.forEach(p => log("> " + p, "er"));
     diagnose();
   }
 }
 
 function diagnose(){
   if(location.protocol === "file:"){
-    log("  Stai aprendo il file dal disco (origin null): i proxy CORS rifiutano queste richieste.", "warn");
-    log("  Servi la pagina via HTTP — <code>npx netlify dev</code> applica anche il redirect /mimit/.", "warn");
+    log("  Stai aprendo il file dal disco: né la funzione né il redirect esistono.", "warn");
+    log("  Avvia <code>npx netlify dev</code> nella cartella del progetto.", "warn");
   }else if(location.hostname === "localhost" || location.hostname === "127.0.0.1"){
-    log("  Su un server statico il redirect /mimit/ non esiste. Usa <code>npx netlify dev</code>", "warn");
-    log("  oppure pubblica su Netlify: in produzione il proxy del netlify.toml funziona.", "warn");
+    log("  Un server statico non esegue le funzioni. Serve <code>npx netlify dev</code>.", "warn");
   }else{
-    log("  Il proxy /mimit/ non risponde: verifica che netlify.toml sia nella root e ridistribuisci.", "warn");
+    log("  Verifica che netlify/functions/prezzi.mjs sia nel repository e ridistribuisci.", "warn");
+    log("  Prova <code>/api/prezzi?prov=LU</code> nel browser per leggere l'errore della funzione.", "warn");
   }
 }
 
 /* ====== filtri ====== */
 function buildFilters(){
-  const brands = [...S.brandCount.entries()].filter(([,n]) => n >= 3)
-    .sort((a,b) => b[1] - a[1]);
+  const brands = [...S.brandCount.entries()].filter(([,n]) => n >= 3).sort((a,b) => b[1] - a[1]);
   if(!brands.length) throw new Error("nessuna bandiera con impianti sufficienti");
   if(!brands.some(([b]) => b === S.brand)) S.brand = brands[0][0];
 
@@ -396,7 +415,6 @@ const pick = (brand, com) => S.rows.filter(r =>
 function render(){
   const rows = pick(S.brand, S.com);
   const scope = S.com || PROV_NOME;
-  $("#mark").innerHTML = "LUCCA<small> ALLA POMPA</small>";
   $("#pumpBrand").textContent = S.brand;
   $("#pumpFuel").textContent = S.fuel + " " + (S.self ? "self" : "servito");
   $("#pumpScope").textContent = scope;
@@ -533,9 +551,10 @@ function drawList(rows, refDay){
     const p = S.plants[r.i];
     const age = r.d < 0 ? null : refDay - r.d;
     const when = age === null ? "n.d." : age <= 0 ? "oggi" : age === 1 ? "ieri" : age + " giorni fa";
-    const q = encodeURIComponent(`${p.n || p.b} ${p.c} Lucca`);
+    const dest = (p.lat && p.lon) ? `${p.lat},${p.lon}`
+      : encodeURIComponent(`${p.n || p.b} ${p.c} Lucca`);
     return `<tr><td class="p">${eur(r.p)}</td>
-      <td class="n"><a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">${p.c || "—"}</a><small>${(p.n || "").slice(0,52)}</small></td>
+      <td class="n"><a href="https://www.google.com/maps/search/?api=1&query=${dest}" target="_blank" rel="noopener">${p.c || "—"}</a><small>${(p.n || "").slice(0,52)}</small></td>
       <td class="${age !== null && age > 7 ? "stale" : ""}">${when}</td></tr>`;
   }).join("");
 }
