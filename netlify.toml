@@ -1,0 +1,9 @@
+[build]
+  publish = "."
+
+# Proxy verso gli open data MIMIT: aggira il CORS senza Netlify Functions.
+[[redirects]]
+  from = "/mimit/*"
+  to = "https://www.mimit.gov.it/images/exportCSV/:splat"
+  status = 200
+  force = true

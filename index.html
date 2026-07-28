@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d08">
+<title>Q8 · Prezzi alla pompa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#0b0d08;
+  --panel:#11150e;
+  --panel-2:#161b12;
+  --grid:#1f2a18;
+  --phos:#8bff6a;
+  --phos-dim:#4f8c3c;
+  --amber:#ffc300;
+  --amber-dim:#8a6c12;
+  --alert:#ff6b3d;
+  --ink:#d8f5cd;
+  --mute:#587249;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--void);
+  color:var(--ink);
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  padding:0 0 48px;
+  overflow-x:hidden;
+}
+/* CRT ambience */
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:9999;
+  background:repeating-linear-gradient(180deg,rgba(0,0,0,0) 0 2px,rgba(0,0,0,.28) 2px 3px);
+  mix-blend-mode:multiply;
+}
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:9998;
+  background:radial-gradient(120% 80% at 50% 40%,rgba(0,0,0,0) 45%,rgba(0,0,0,.55) 100%);
+}
+@media (prefers-reduced-motion: no-preference){
+  body::before{animation:flick 6s steps(2,end) infinite}
+  @keyframes flick{0%,97%{opacity:1}98%{opacity:.82}100%{opacity:1}}
+}
+.wrap{max-width:960px;margin:0 auto;padding:0 14px}
+
+/* ---------- rail ---------- */
+.rail{
+  border-bottom:1px solid var(--grid);
+  background:linear-gradient(180deg,#0f1310,#0b0d08);
+  position:sticky;top:0;z-index:50;
+}
+.rail .wrap{display:flex;align-items:baseline;gap:10px;height:46px}
+.mark{
+  font-family:VT323,monospace;font-size:30px;line-height:1;color:var(--amber);
+  letter-spacing:.06em;text-shadow:0 0 12px rgba(255,195,0,.35);
+}
+.mark small{color:var(--phos-dim);font-size:15px;letter-spacing:.18em}
+.rail .stamp{margin-left:auto;font-size:11px;color:var(--mute);letter-spacing:.08em}
+
+/* ---------- pump display (signature) ---------- */
+.pump{
+  margin:18px 0 8px;border:1px solid var(--grid);border-radius:3px;
+  background:
+    linear-gradient(180deg,#0d1109,#090c07);
+  box-shadow:inset 0 0 60px rgba(139,255,106,.05);
+  overflow:hidden;
+}
+.pump-top{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:8px 14px;border-bottom:1px solid var(--grid);
+  font-size:11px;letter-spacing:.16em;color:var(--phos-dim);text-transform:uppercase;
+}
+.pump-top b{color:var(--amber);font-weight:500}
+.pump-body{display:grid;grid-template-columns:1fr auto;gap:10px;padding:16px 14px 14px;align-items:end}
+.readout{
+  font-family:VT323,monospace;
+  font-size:clamp(64px,19vw,132px);
+  line-height:.82;
+  color:var(--phos);
+  letter-spacing:.02em;
+  text-shadow:0 0 26px rgba(139,255,106,.35);
+  display:flex;align-items:flex-end;gap:8px;
+}
+.readout .cur{font-size:.28em;color:var(--phos-dim);letter-spacing:.1em;padding-bottom:.9em}
+.readout.stale{color:var(--amber);text-shadow:0 0 26px rgba(255,195,0,.3)}
+.readout-sub{font-size:11px;color:var(--mute);letter-spacing:.1em;margin-top:6px}
+.ghost{position:relative}
+.ghost::before{
+  content:"8.888";position:absolute;inset:0;color:rgba(139,255,106,.07);pointer-events:none;
+}
+.spread{
+  text-align:right;font-size:12px;color:var(--mute);letter-spacing:.06em;white-space:nowrap;
+}
+.spread b{display:block;font-family:VT323,monospace;font-size:26px;letter-spacing:.04em;line-height:1.1}
+.spread .lo b{color:var(--phos)}
+.spread .hi b{color:var(--alert)}
+.spread div+div{margin-top:8px}
+
+/* ---------- boot log ---------- */
+.boot{
+  border:1px solid var(--grid);border-radius:3px;background:var(--panel);
+  padding:12px 14px;margin:18px 0;font-size:12px;color:var(--phos-dim);
+  white-space:pre-wrap;min-height:76px;
+}
+.boot .ok{color:var(--phos)}
+.boot .er{color:var(--alert)}
+.bar{height:3px;background:var(--grid);margin-top:8px;overflow:hidden;border-radius:2px}
+.bar i{display:block;height:100%;width:0;background:var(--amber);transition:width .18s linear}
+
+/* ---------- controls ---------- */
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 4px}
+.field{display:flex;flex-direction:column;gap:4px;flex:1 1 130px}
+.field label{font-size:10px;letter-spacing:.16em;color:var(--mute);text-transform:uppercase}
+select,button{
+  font-family:inherit;font-size:13px;color:var(--ink);
+  background:var(--panel-2);border:1px solid var(--grid);border-radius:2px;
+  padding:8px 10px;appearance:none;
+}
+select:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+button{cursor:pointer;color:var(--amber);letter-spacing:.08em}
+button:hover{border-color:var(--amber-dim)}
+.seg{display:flex;border:1px solid var(--grid);border-radius:2px;overflow:hidden}
+.seg button{flex:1;border:0;border-radius:0;color:var(--mute);background:transparent}
+.seg button[aria-pressed="true"]{background:var(--grid);color:var(--phos)}
+
+/* ---------- kpi ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:14px 0}
+.kpi{border:1px solid var(--grid);background:var(--panel);padding:10px 12px;border-radius:3px}
+.kpi span{display:block;font-size:10px;letter-spacing:.14em;color:var(--mute);text-transform:uppercase}
+.kpi b{font-family:VT323,monospace;font-size:30px;line-height:1.1;color:var(--ink);font-weight:400}
+.kpi b.up{color:var(--alert)} .kpi b.down{color:var(--phos)}
+
+/* ---------- panels ---------- */
+.panel{border:1px solid var(--grid);background:var(--panel);border-radius:3px;margin:14px 0;overflow:hidden}
+.panel h2{
+  margin:0;padding:10px 14px;border-bottom:1px solid var(--grid);
+  font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);font-weight:500;
+  display:flex;justify-content:space-between;gap:10px;align-items:baseline;
+}
+.panel h2 em{font-style:normal;color:var(--mute);letter-spacing:.06em;font-size:10px;text-transform:none}
+.panel .pad{padding:12px 14px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.axis{stroke:var(--grid);stroke-width:1}
+.gl{stroke:var(--grid);stroke-width:1;stroke-dasharray:2 4}
+.tick{fill:var(--mute);font-size:9px;font-family:"IBM Plex Mono",monospace}
+.lbl{fill:var(--ink);font-size:10px;font-family:"IBM Plex Mono",monospace}
+.val{fill:var(--phos);font-size:10px;font-family:"IBM Plex Mono",monospace}
+.line{fill:none;stroke:var(--phos);stroke-width:1.6}
+.area{fill:rgba(139,255,106,.07)}
+.dot{fill:var(--void);stroke:var(--phos);stroke-width:1.4}
+.barq{fill:var(--amber)} .baro{fill:var(--phos-dim)}
+
+/* ---------- table ---------- */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:7px 14px;border-bottom:1px solid var(--grid);vertical-align:top}
+th{font-size:10px;letter-spacing:.12em;color:var(--mute);text-transform:uppercase;font-weight:500}
+td.p{font-family:VT323,monospace;font-size:22px;color:var(--phos);white-space:nowrap}
+td.n small{display:block;color:var(--mute);font-size:11px}
+tbody tr:last-child td{border-bottom:0}
+a{color:var(--amber);text-decoration:none;border-bottom:1px dotted var(--amber-dim)}
+
+.note{font-size:11px;color:var(--mute);line-height:1.6}
+footer{margin-top:22px;font-size:11px;color:var(--mute);line-height:1.7}
+.hide{display:none !important}
+@media(max-width:520px){
+  .pump-body{grid-template-columns:1fr}
+  .spread{text-align:left;display:flex;gap:22px}
+  .spread div+div{margin-top:0}
+}
+</style>
+</head>
+<body>
+
+<div class="rail"><div class="wrap">
+  <div class="mark">Q8<small> KUWAIT</small></div>
+  <div class="stamp" id="stamp">—</div>
+</div></div>
+
+<main class="wrap">
+
+  <!-- SIGNATURE: totalizzatore da colonnina -->
+  <section class="pump" aria-labelledby="pumpLabel">
+    <div class="pump-top">
+      <span id="pumpLabel">Prezzo medio rete Q8 · <b id="pumpFuel">Benzina self</b></span>
+      <span id="pumpScope">Italia</span>
+    </div>
+    <div class="pump-body">
+      <div>
+        <div class="readout ghost" id="readout">—.———<span class="cur">€/L</span></div>
+        <div class="readout-sub" id="readoutSub">in attesa dei dati</div>
+      </div>
+      <div class="spread">
+        <div class="lo">più basso<b id="loVal">—</b><span id="loWho">—</span></div>
+        <div class="hi">più alto<b id="hiVal">—</b><span id="hiWho">—</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="boot" id="boot">> avvio…<div class="bar"><i id="prog"></i></div></div>
+
+  <section class="controls" id="controls" hidden>
+    <div class="field">
+      <label for="fuel">Carburante</label>
+      <select id="fuel"></select>
+    </div>
+    <div class="field">
+      <label for="prov">Provincia</label>
+      <select id="prov"><option value="">Tutta Italia</option></select>
+    </div>
+    <div class="field" style="flex:0 1 180px">
+      <label>Modalità</label>
+      <div class="seg" role="group" aria-label="Modalità di erogazione">
+        <button id="bSelf" aria-pressed="true">Self</button>
+        <button id="bServ" aria-pressed="false">Servito</button>
+      </div>
+    </div>
+    <div class="field" style="flex:0 1 120px">
+      <label for="reload">Dati</label>
+      <button id="reload">Aggiorna</button>
+    </div>
+  </section>
+
+  <div class="kpis" id="kpis" hidden>
+    <div class="kpi"><span>Impianti Q8</span><b id="kCount">—</b></div>
+    <div class="kpi"><span>Mediana</span><b id="kMed">—</b></div>
+    <div class="kpi"><span>Δ vs altre bandiere</span><b id="kDelta">—</b></div>
+    <div class="kpi"><span>Aggiornati &lt; 3 gg</span><b id="kFresh">—</b></div>
+  </div>
+
+  <section class="panel" id="pTrend" hidden>
+    <h2>Andamento <em>media per giorno di ultima comunicazione</em></h2>
+    <div class="pad"><svg id="svgTrend" viewBox="0 0 640 220" role="img" aria-label="Andamento del prezzo medio Q8"></svg>
+      <p class="note">Ogni punto è la media dei distributori Q8 la cui ultima comunicazione al MIMIT risale a quel giorno. Non è una serie storica dello stesso impianto: è una fotografia di come si sono mossi i listini comunicati di recente.</p>
+    </div>
+  </section>
+
+  <section class="panel" id="pBrand" hidden>
+    <h2>Q8 contro le altre bandiere <em>stesso carburante, stessa modalità</em></h2>
+    <div class="pad"><svg id="svgBrand" viewBox="0 0 640 260" role="img" aria-label="Confronto tra bandiere"></svg></div>
+  </section>
+
+  <section class="panel" id="pProv" hidden>
+    <h2>Dove Q8 costa meno <em>province con almeno 4 impianti</em></h2>
+    <div class="pad"><svg id="svgProv" viewBox="0 0 640 260" role="img" aria-label="Media per provincia"></svg></div>
+  </section>
+
+  <section class="panel" id="pList" hidden>
+    <h2>I dieci Q8 più economici <em id="listScope"></em></h2>
+    <table><thead><tr><th>Prezzo</th><th>Impianto</th><th>Comunicato</th></tr></thead>
+    <tbody id="tbody"></tbody></table>
+  </section>
+
+  <footer>
+    Fonte: Ministero delle Imprese e del Made in Italy — Osservaprezzi Carburanti,
+    dataset <em>prezzo_alle_8.csv</em> e <em>anagrafica_impianti_attivi.csv</em>, licenza IODL 2.0.
+    I prezzi sono quelli in vigore alle 8 del mattino comunicati dai gestori: si aggiornano una volta al giorno, non in tempo reale.
+    Servizio non ufficiale, non affiliato a MIMIT né a Kuwait Petroleum Italia.
+  </footer>
+</main>
+
+<script>
+(() => {
+"use strict";
+
+/* ============ sorgenti ============ */
+const FILES = { ana:"anagrafica_impianti_attivi.csv", prz:"prezzo_alle_8.csv" };
+const ORIGIN = "https://www.mimit.gov.it/images/exportCSV/";
+const ROUTES = [
+  f => "/mimit/" + f,                                                   // proxy Netlify (netlify.toml)
+  f => "https://corsproxy.io/?url=" + encodeURIComponent(ORIGIN + f),   // fallback pubblico
+  f => "https://api.allorigins.win/raw?url=" + encodeURIComponent(ORIGIN + f)
+];
+
+/* ============ stato ============ */
+const S = {
+  plants:new Map(),   // id -> {name,com,prov}
+  q8:new Set(),
+  rows:[],            // {id,fuel,price,self,day}  (day = Date senza ora)
+  others:[],          // {brand,fuel,price,self}
+  extraction:null,
+  fuel:"Benzina",
+  self:true,
+  prov:""
+};
+
+/* ============ util ============ */
+const $ = s => document.querySelector(s);
+const boot = $("#boot"), prog = $("#prog");
+let bootLines = [];
+function log(txt, cls){
+  bootLines.push(cls ? `<span class="${cls}">${txt}</span>` : txt);
+  if(bootLines.length > 6) bootLines.shift();
+  boot.innerHTML = bootLines.join("\n") + '<div class="bar"><i id="prog" style="width:'+lastPct+'%"></i></div>';
+}
+let lastPct = 0;
+function pct(p){ lastPct = p; const el = boot.querySelector("i"); if(el) el.style.width = p + "%"; }
+
+const eur = n => n.toLocaleString("it-IT",{minimumFractionDigits:3,maximumFractionDigits:3});
+const mean = a => a.reduce((x,y)=>x+y,0)/a.length;
+function median(a){ const s=[...a].sort((x,y)=>x-y),m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+const isQ8 = b => { const u=(b||"").toUpperCase().trim(); return u.startsWith("Q8") || u.includes("KUWAIT"); };
+
+/* dd/mm/yyyy hh:mm:ss -> Date (mezzanotte) */
+function parseDay(s){
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s||"");
+  return m ? new Date(+m[3], +m[2]-1, +m[1]) : null;
+}
+const dayKey = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+
+/* ============ download a flusso ============ */
+async function streamCSV(file, onLine, label){
+  let lastErr;
+  for(const route of ROUTES){
+    const url = route(file);
+    try{
+      const res = await fetch(url, {cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      const total = +(res.headers.get("content-length") || 0);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder("utf-8");
+      let buf = "", got = 0, n = 0, valid = false;
+      for(;;){
+        const {done, value} = await reader.read();
+        if(done) break;
+        got += value.length;
+        pct(total ? Math.min(99, got/total*100) : Math.min(95, n/9000));
+        buf += dec.decode(value, {stream:true});
+        let i;
+        while((i = buf.indexOf("\n")) >= 0){
+          const line = buf.slice(0, i).replace(/\r$/, "");
+          buf = buf.slice(i+1);
+          if(n === 0 && !/^Estrazione del/.test(line)) throw new Error("risposta non valida");
+          if(n === 0) valid = true;
+          if(n > 1) onLine(line);
+          else if(n === 0) S.extraction = line.replace("Estrazione del","").trim();
+          n++;
+        }
+      }
+      buf += dec.decode();
+      if(buf.trim() && n > 1) onLine(buf.replace(/\r$/, ""));
+      if(!valid) throw new Error("intestazione mancante");
+      log("  " + label + " · " + n.toLocaleString("it-IT") + " righe", "ok");
+      return;
+    }catch(e){ lastErr = e; }
+  }
+  throw new Error(label + ": " + lastErr.message);
+}
+
+/* ============ parsing ============ */
+/* anagrafica: id|gestore|bandiera|tipo|nome|indirizzo|comune|prov|lat|lon
+   attenzione: alcuni nomi contengono "|", quindi si legge da entrambi i capi */
+function onAnagrafica(line){
+  const p = line.split("|");
+  if(p.length < 10) return;
+  const brand = p[2];
+  const prov  = p[p.length-3];
+  const com   = p[p.length-4];
+  const id    = p[0];
+  if(isQ8(brand)){
+    S.q8.add(id);
+    S.plants.set(id, {name:(p[4]||"").trim(), com:(com||"").trim(), prov:(prov||"").trim(), brand:brand.trim()});
+  }else{
+    S.plants.set(id, {brand:(brand||"").trim()});
+  }
+}
+
+/* prezzi: id|carburante|prezzo|isSelf|dtComu */
+function onPrezzi(line){
+  const p = line.split("|");
+  if(p.length < 5) return;
+  const price = parseFloat(p[2]);
+  if(!(price > 0.2 && price < 5)) return;              // scarta refusi e placeholder
+  const id = p[0], fuel = p[1], self = p[3] === "1";
+  if(S.q8.has(id)){
+    S.rows.push({id, fuel, price, self, day:parseDay(p[4])});
+  }else{
+    const pl = S.plants.get(id);
+    if(pl && pl.brand) S.others.push({brand:pl.brand, fuel, price, self});
+  }
+}
+
+/* ============ caricamento ============ */
+async function load(){
+  bootLines = []; lastPct = 0;
+  S.plants.clear(); S.q8.clear(); S.rows = []; S.others = [];
+  boot.classList.remove("hide");
+  log("> apertura canale MIMIT…");
+  try{
+    log("> anagrafica impianti");
+    await streamCSV(FILES.ana, onAnagrafica, "anagrafica");
+    log("> listini alle 8:00");
+    await streamCSV(FILES.prz, onPrezzi, "prezzi");
+    pct(100);
+    if(!S.rows.length) throw new Error("nessun impianto Q8 trovato nei dati");
+    log("> " + S.q8.size.toLocaleString("it-IT") + " impianti a bandiera Q8 · estrazione " + S.extraction, "ok");
+    setTimeout(()=>boot.classList.add("hide"), 900);
+    buildFilters();
+    render();
+    $("#controls").hidden = false; $("#kpis").hidden = false;
+    ["#pTrend","#pBrand","#pProv","#pList"].forEach(s => $(s).hidden = false);
+    $("#stamp").textContent = "estrazione " + S.extraction;
+  }catch(e){
+    log("> " + e.message, "er");
+    log("  se sei in locale il proxy /mimit/ non esiste: pubblica su Netlify con netlify.toml", "er");
+  }
+}
+
+/* ============ filtri ============ */
+function buildFilters(){
+  const fuels = [...new Set(S.rows.map(r=>r.fuel))]
+    .map(f => [f, S.rows.filter(r=>r.fuel===f).length])
+    .sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
+  $("#fuel").innerHTML = fuels.map(f=>`<option${f===S.fuel?" selected":""}>${f}</option>`).join("");
+  if(!fuels.includes(S.fuel)) S.fuel = fuels[0];
+
+  const provs = [...new Set([...S.q8].map(id => (S.plants.get(id)||{}).prov).filter(Boolean))].sort();
+  $("#prov").innerHTML = '<option value="">Tutta Italia</option>' +
+    provs.map(p=>`<option value="${p}"${p===S.prov?" selected":""}>${p}</option>`).join("");
+}
+
+const current = () => S.rows.filter(r =>
+  r.fuel === S.fuel && r.self === S.self &&
+  (!S.prov || (S.plants.get(r.id)||{}).prov === S.prov));
+
+/* ============ render ============ */
+function render(){
+  const rows = current();
+  const scope = S.prov ? "Provincia di " + S.prov : "Italia";
+  $("#pumpFuel").textContent = S.fuel + " " + (S.self ? "self" : "servito");
+  $("#pumpScope").textContent = scope;
+  $("#listScope").textContent = scope.toLowerCase();
+
+  const ro = $("#readout");
+  if(!rows.length){
+    ro.innerHTML = '—.———<span class="cur">€/L</span>';
+    $("#readoutSub").textContent = "nessun impianto Q8 con questo carburante qui";
+    $("#kCount").textContent = "0"; $("#kMed").textContent = "—";
+    $("#kDelta").textContent = "—"; $("#kFresh").textContent = "—";
+    ["#svgTrend","#svgBrand","#svgProv"].forEach(s=>$(s).innerHTML="");
+    $("#tbody").innerHTML = "";
+    return;
+  }
+
+  const prices = rows.map(r=>r.price);
+  const avg = mean(prices);
+  ro.innerHTML = eur(avg) + '<span class="cur">€/L</span>';
+
+  const lo = rows.reduce((a,b)=>b.price<a.price?b:a);
+  const hi = rows.reduce((a,b)=>b.price>a.price?b:a);
+  const who = r => { const p = S.plants.get(r.id)||{}; return (p.com||"?") + (p.prov?" ("+p.prov+")":""); };
+  $("#loVal").textContent = eur(lo.price); $("#loWho").textContent = who(lo);
+  $("#hiVal").textContent = eur(hi.price); $("#hiWho").textContent = who(hi);
+  $("#readoutSub").textContent = rows.length + " impianti · forbice " + eur(hi.price-lo.price) + " €/L";
+
+  // KPI
+  $("#kCount").textContent = rows.length;
+  $("#kMed").textContent = eur(median(prices));
+
+  const oth = S.others.filter(o => o.fuel === S.fuel && o.self === S.self).map(o=>o.price);
+  const kd = $("#kDelta");
+  if(oth.length > 30){
+    const d = avg - mean(oth);
+    kd.textContent = (d>=0?"+":"−") + eur(Math.abs(d));
+    kd.className = d > 0 ? "up" : "down";
+  }else{ kd.textContent = "—"; kd.className = ""; }
+
+  const ref = S.extraction ? new Date(S.extraction) : new Date();
+  const fresh = rows.filter(r => r.day && (ref - r.day)/864e5 <= 3).length;
+  $("#kFresh").textContent = Math.round(fresh/rows.length*100) + "%";
+
+  drawTrend(rows, ref);
+  drawBrands();
+  drawProv();
+  drawList(rows);
+}
+
+/* ---- grafico 1: media per giorno di comunicazione ---- */
+function drawTrend(rows, ref){
+  const buckets = new Map();
+  for(const r of rows){
+    if(!r.day) continue;
+    const age = (ref - r.day)/864e5;
+    if(age < 0 || age > 29) continue;
+    const k = dayKey(r.day);
+    (buckets.get(k) || buckets.set(k, []).get(k)).push(r.price);
+  }
+  const pts = [...buckets.entries()]
+    .filter(([,v]) => v.length >= 3)
+    .map(([k,v]) => ({k, v:mean(v), n:v.length}))
+    .sort((a,b)=>a.k.localeCompare(b.k));
+
+  const svg = $("#svgTrend");
+  if(pts.length < 3){ svg.innerHTML = txt(320,110,"dati insufficienti per il periodo","tick",'middle'); return; }
+
+  const W=640,H=220,L=48,R=10,T=14,B=28;
+  const xs = i => L + i*(W-L-R)/(pts.length-1);
+  const vals = pts.map(p=>p.v);
+  let min = Math.min(...vals), max = Math.max(...vals);
+  const padv = Math.max((max-min)*0.25, 0.004); min -= padv; max += padv;
+  const ys = v => T + (max-v)/(max-min)*(H-T-B);
+
+  let g = "";
+  for(let i=0;i<=3;i++){
+    const v = min + (max-min)*i/3, y = ys(v);
+    g += `<line class="gl" x1="${L}" y1="${y}" x2="${W-R}" y2="${y}"/>`;
+    g += txt(L-6, y+3, eur(v), "tick", "end");
+  }
+  const d = pts.map((p,i)=>`${i?"L":"M"}${xs(i).toFixed(1)},${ys(p.v).toFixed(1)}`).join(" ");
+  g += `<path class="area" d="${d} L${xs(pts.length-1)},${H-B} L${L},${H-B} Z"/>`;
+  g += `<path class="line" d="${d}"/>`;
+  pts.forEach((p,i)=>{ g += `<circle class="dot" cx="${xs(i).toFixed(1)}" cy="${ys(p.v).toFixed(1)}" r="2.6"><title>${p.k} · ${eur(p.v)} €/L · ${p.n} impianti</title></circle>`; });
+  const step = Math.ceil(pts.length/6);
+  pts.forEach((p,i)=>{ if(i%step===0||i===pts.length-1) g += txt(xs(i), H-10, p.k.slice(8)+"/"+p.k.slice(5,7), "tick", "middle"); });
+  g += `<line class="axis" x1="${L}" y1="${H-B}" x2="${W-R}" y2="${H-B}"/>`;
+  svg.innerHTML = g;
+}
+
+/* ---- grafico 2: bandiere ---- */
+function drawBrands(){
+  const by = new Map();
+  const add = (b,p) => { (by.get(b) || by.set(b,[]).get(b)).push(p); };
+  for(const o of S.others) if(o.fuel===S.fuel && o.self===S.self) add(o.brand, o.price);
+  for(const r of S.rows)   if(r.fuel===S.fuel && r.self===S.self) add("Q8", r.price);
+
+  const items = [...by.entries()].filter(([,v])=>v.length>=40)
+    .map(([b,v])=>({b, v:mean(v), n:v.length}))
+    .sort((a,b)=>b.n-a.n).slice(0,9)
+    .sort((a,b)=>a.v-b.v);
+  hbars($("#svgBrand"), items.map(i=>({label:i.b, value:i.v, hl:i.b==="Q8", tip:i.n+" impianti"})));
+}
+
+/* ---- grafico 3: province ---- */
+function drawProv(){
+  const by = new Map();
+  for(const r of S.rows){
+    if(r.fuel!==S.fuel || r.self!==S.self) continue;
+    const pv = (S.plants.get(r.id)||{}).prov; if(!pv) continue;
+    (by.get(pv) || by.set(pv,[]).get(pv)).push(r.price);
+  }
+  const items = [...by.entries()].filter(([,v])=>v.length>=4)
+    .map(([p,v])=>({p, v:mean(v), n:v.length}))
+    .sort((a,b)=>a.v-b.v).slice(0,10);
+  hbars($("#svgProv"), items.map(i=>({label:i.p, value:i.v, hl:i.p===S.prov, tip:i.n+" impianti"})));
+}
+
+/* ---- barre orizzontali ---- */
+function hbars(svg, items){
+  if(!items.length){ svg.innerHTML = txt(320,120,"dati insufficienti","tick","middle"); return; }
+  const W=640, L=72, R=56, rowH=24, T=8;
+  const H = T + items.length*rowH + 8;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const vals = items.map(i=>i.value);
+  const min = Math.min(...vals)*0.985, max = Math.max(...vals);
+  const w = v => Math.max(2, (v-min)/(max-min||1)*(W-L-R));
+  let g = "";
+  items.forEach((it,i)=>{
+    const y = T + i*rowH;
+    g += `<rect x="${L}" y="${y+4}" width="${w(it.value).toFixed(1)}" height="${rowH-11}" class="${it.hl?"barq":"baro"}" rx="1"><title>${it.label} · ${eur(it.value)} €/L · ${it.tip}</title></rect>`;
+    g += txt(L-8, y+rowH/2+1, it.label, "lbl", "end");
+    g += txt(L + w(it.value) + 6, y+rowH/2+1, eur(it.value), it.hl?"val":"tick", "start");
+  });
+  svg.innerHTML = g;
+}
+const txt = (x,y,s,cls,anchor) => `<text x="${x}" y="${y}" class="${cls}" text-anchor="${anchor}" dominant-baseline="middle">${s}</text>`;
+
+/* ---- tabella ---- */
+function drawList(rows){
+  const ref = S.extraction ? new Date(S.extraction) : new Date();
+  const top = [...rows].sort((a,b)=>a.price-b.price).slice(0,10);
+  $("#tbody").innerHTML = top.map(r=>{
+    const p = S.plants.get(r.id)||{};
+    const age = r.day ? Math.round((ref-r.day)/864e5) : null;
+    const when = age===null ? "n.d." : age<=0 ? "oggi" : age===1 ? "ieri" : age+" giorni fa";
+    const q = encodeURIComponent(`${p.name||"Q8"} ${p.com||""} ${p.prov||""}`);
+    return `<tr>
+      <td class="p">${eur(r.price)}</td>
+      <td class="n"><a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">${p.com||"—"}</a><small>${(p.name||"").slice(0,48)}</small></td>
+      <td>${when}</td></tr>`;
+  }).join("");
+}
+
+/* ============ eventi ============ */
+$("#fuel").addEventListener("change", e => { S.fuel = e.target.value; render(); });
+$("#prov").addEventListener("change", e => { S.prov = e.target.value; render(); });
+$("#bSelf").addEventListener("click", () => setMode(true));
+$("#bServ").addEventListener("click", () => setMode(false));
+function setMode(self){
+  S.self = self;
+  $("#bSelf").setAttribute("aria-pressed", String(self));
+  $("#bServ").setAttribute("aria-pressed", String(!self));
+  render();
+}
+$("#reload").addEventListener("click", load);
+
+load();
+})();
+</script>
+</body>
+</html>
