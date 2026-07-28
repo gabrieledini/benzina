@@ -166,11 +166,11 @@ footer{margin-top:22px;font-size:11px;color:var(--mute);line-height:1.7}
   </div>
 
   <section class="panel" id="pTrend" hidden>
-    <h2>Andamento <em>media per giorno di ultima comunicazione</em></h2>
+    <h2>Andamento <em id="trendSrc">—</em></h2>
     <div class="pad">
       <div class="key" id="trendKey"></div>
       <svg id="svgTrend" viewBox="0 0 640 220" role="img" aria-label="Andamento del prezzo medio"></svg>
-      <p class="note">Ogni punto è la media degli impianti la cui ultima comunicazione al MIMIT risale a quel giorno. Non è la serie storica di un singolo distributore, e in provincia i campioni giornalieri sono piccoli: leggilo come tendenza, non come misura.</p>
+      <p class="note" id="trendNote"></p>
     </div>
   </section>
 
@@ -211,13 +211,17 @@ const PROV_NOME = "provincia di Lucca";
    I proxy CORS pubblici sono stati tolti: allorigins va in timeout e
    codetabs si ferma a 5 MB, quindi su questi file non funzionano.        */
 const API = "/api/prezzi?prov=" + PROVINCIA;
+const STORICO = "/api/storico?prov=" + PROVINCIA;
 const CSV = { ana:"/mimit/anagrafica_impianti_attivi.csv", prz:"/mimit/prezzo_alle_8.csv" };
 const IDLE_MS = 25000;
+const GIORNI = 30;
+const MIN_PUNTI = 4;   // sotto questa soglia lo storico è troppo corto: si stima
 
 /* ====== stato ====== */
 const S = {
   plants:[], index:new Map(), rows:[], brandCount:new Map(),
-  extraction:null, brand:"Q8", brand2:"*", fuel:"Benzina", self:true, com:""
+  extraction:null, brand:"Q8", brand2:"*", fuel:"Benzina", self:true, com:"",
+  hist:new Map()        // "carburante|self" -> {serie:{bandiera:[{d,m,n}]}} | null
 };
 
 /* ====== util ====== */
@@ -253,6 +257,37 @@ function dayLabel(n){ const d = new Date(EPOCH + n*864e5);
 function contaBandiere(){
   S.brandCount.clear();
   for(const p of S.plants) S.brandCount.set(p.b, (S.brandCount.get(p.b)||0) + 1);
+}
+
+const isoToDay = iso => Math.round((Date.parse(iso) - EPOCH)/864e5);
+const refDay = () => S.extraction
+  ? Math.round((Date.parse(S.extraction) - EPOCH)/864e5)
+  : Math.round((Date.now() - EPOCH)/864e5);
+
+/* ====== storico reale, un punto al giorno ====== */
+const histKey = () => S.fuel + "|" + (S.self ? 1 : 0);
+
+async function ensureStorico(){
+  const k = histKey();
+  if(S.hist.has(k)) return;                 // già caricato o in corso
+  S.hist.set(k, null);
+  try{
+    const res = await fetch(`${STORICO}&carb=${encodeURIComponent(S.fuel)}&self=${S.self ? 1 : 0}&giorni=${GIORNI}`);
+    const j = await res.json();
+    if(res.ok && j.serie) S.hist.set(k, j);
+  }catch(e){ /* si resta sulla stima */ }
+  if(histKey() === k) drawTrend();           // ridisegna solo se il filtro non è cambiato
+}
+
+/* serie dallo storico: null se non c'è o è troppo corta.
+   Lo storico è provinciale, quindi non si applica ai filtri per comune. */
+function histSeries(brand){
+  if(S.com) return null;
+  const j = S.hist.get(histKey());
+  if(!j) return null;
+  const arr = j.serie[brand];
+  if(!arr || arr.length < MIN_PUNTI) return null;
+  return arr.map(p => ({ d:isoToDay(p.d), v:p.m, n:p.n }));
 }
 
 /* ====== via 1: la funzione ====== */
@@ -453,29 +488,42 @@ function render(){
     kd.className = d > 0 ? "up" : "down";
   }else{ kd.textContent = "—"; kd.className = ""; }
 
-  const refDay = S.extraction ? Math.round((Date.parse(S.extraction) - EPOCH)/864e5) : 0;
-  $("#kFresh").textContent = Math.round(rows.filter(r => r.d >= 0 && refDay - r.d <= 3).length / rows.length * 100) + "%";
+  const rd = refDay();
+  $("#kFresh").textContent = Math.round(rows.filter(r => r.d >= 0 && rd - r.d <= 3).length / rows.length * 100) + "%";
 
-  drawTrend(refDay); drawBrands(); drawComuni(); drawList(rows, refDay);
+  drawTrend(); drawBrands(); drawComuni(); drawList(rows, rd);
+  ensureStorico();
 }
 
-function series(brand, refDay){
+/* stima di ripiego: raggruppa per data di ultima comunicazione.
+   Serve solo finché lo storico giornaliero non ha abbastanza punti. */
+function stima(brand, rd){
   const b = new Map();
   for(const r of pick(brand, S.com)){
-    if(r.d < 0 || refDay - r.d < 0 || refDay - r.d > 29) continue;
+    if(r.d < 0 || rd - r.d < 0 || rd - r.d > GIORNI - 1) continue;
     push(b, r.d, r.p);
   }
   return [...b.entries()].filter(([,v]) => v.length >= 2)
     .map(([d,v]) => ({d, v:mean(v), n:v.length})).sort((a,b) => a.d - b.d);
 }
 
-function drawTrend(refDay){
-  const A = series(S.brand, refDay);
-  const B = S.brand2 ? series(S.brand2, refDay) : [];
+function drawTrend(){
+  const rd = refDay();
+  const reale = histSeries(S.brand);
+  const A = reale || stima(S.brand, rd);
+  const B = !S.brand2 ? [] : (reale ? (histSeries(S.brand2) || []) : stima(S.brand2, rd));
+
+  $("#trendSrc").textContent = reale
+    ? "storico giornaliero · " + A.length + (A.length === 1 ? " rilevazione" : " rilevazioni")
+    : "stima dalle date di comunicazione";
+  $("#trendNote").textContent = reale
+    ? "Serie costruita salvando una fotografia al giorno: ogni punto è la media provinciale di quella data. Cresce di un punto al giorno fino a coprire " + GIORNI + " giorni."
+    : "Lo storico giornaliero è ancora troppo corto, quindi qui ogni punto è la media degli impianti la cui ultima comunicazione risale a quella data. Indica una tendenza, non una misura: gli impianti cambiano da un punto all'altro.";
+
   const svg = $("#svgTrend");
   $("#trendKey").innerHTML = `<span><i style="background:var(--amber)"></i>${S.brand}</span>` +
-    (S.brand2 ? `<span><i style="background:var(--cyan)"></i>${S.brand2 === "*" ? "media provinciale" : S.brand2}</span>` : "");
-  if(A.length < 3){ svg.innerHTML = t(320,110,"pochi aggiornamenti per tracciare una linea","tick","middle"); return; }
+    (S.brand2 && B.length ? `<span><i style="background:var(--cyan)"></i>${S.brand2 === "*" ? "media provinciale" : S.brand2}</span>` : "");
+  if(A.length < 3){ svg.innerHTML = t(320,110,"pochi dati per tracciare una linea","tick","middle"); return; }
 
   const W=640,H=220,L=48,R=10,T=14,Bm=28;
   const all = A.concat(B);
@@ -545,11 +593,11 @@ function hbars(svg, items){
 }
 const t = (x,y,s,cls,anchor) => `<text x="${x}" y="${y}" class="${cls}" text-anchor="${anchor}" dominant-baseline="middle">${s}</text>`;
 
-function drawList(rows, refDay){
+function drawList(rows, rd){
   const sorted = [...rows].sort((a,b) => a.p - b.p);
   $("#tbody").innerHTML = sorted.map(r => {
     const p = S.plants[r.i];
-    const age = r.d < 0 ? null : refDay - r.d;
+    const age = r.d < 0 ? null : rd - r.d;
     const when = age === null ? "n.d." : age <= 0 ? "oggi" : age === 1 ? "ieri" : age + " giorni fa";
     const dest = (p.lat && p.lon) ? `${p.lat},${p.lon}`
       : encodeURIComponent(`${p.n || p.b} ${p.c} Lucca`);

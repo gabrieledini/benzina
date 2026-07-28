@@ -1,0 +1,10 @@
+{
+  "name": "prezzi-carburanti-lucca",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Prezzi alla pompa in provincia di Lucca dagli open data MIMIT",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}
